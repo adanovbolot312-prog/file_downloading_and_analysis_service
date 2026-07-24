@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Скачивание данных</title>
+<style>
+body { font-family: -apple-system, Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #222; background: #fff; }
+nav { margin-bottom: 30px; }
+nav a { margin-right: 20px; text-decoration: none; color: #0066cc; font-weight: 600; }
+button { padding: 10px 24px; font-size: 16px; background: #0066cc; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+button:disabled { background: #999; cursor: default; }
+.stats { margin-top: 24px; line-height: 1.9; font-size: 15px; }
+.stats b { display: inline-block; min-width: 220px; }
+.done { color: #1a7f37; font-weight: 600; }
+.err { color: #c00; font-weight: 600; }
+.wait { color: #b45309; }
+</style>
+</head>
+<body>
+<nav><a href="/">Скачивание</a><a href="/files">Скачанные файлы</a></nav>
+<h1>Скачивание данных</h1>
+<button id="startBtn" onclick="start()">Скачать данные</button>
+<div class="stats" id="stats"></div>
+<script>
+let polling = null;
+
+async function start() {
+  await fetch('/api/start', { method: 'POST' });
+  poll();
+  if (!polling) polling = setInterval(poll, 1000);
+}
+
+async function poll() {
+  const r = await fetch('/api/status');
+  const s = await r.json();
+  const el = document.getElementById('stats');
+  let html = '';
+  if (s.start_time) html += `<div><b>Время старта (НСК):</b> ${s.start_time}</div>`;
+  if (s.names_received) html += `<div><b>Текущая порция:</b> получено ${s.names_received} названий файлов, скачано ${s.downloaded_of_batch} из ${s.names_received}</div>`;
+  html += `<div><b>Всего скачано файлов:</b> ${s.total_downloaded}</div>`;
+  if (s.waiting) html += `<div class="wait">Лимит запросов, ожидание ${s.waiting} сек…</div>`;
+  if (s.running) html += `<div>Идёт скачивание…</div>`;
+  if (s.finished) html += `<div class="done">Каталог скачан полностью</div>`;
+  if (s.error) html += `<div class="err">Ошибка: ${s.error}</div>`;
+  el.innerHTML = html;
+  document.getElementById('startBtn').disabled = s.running;
+  if (!s.running && polling && (s.finished || s.error)) { clearInterval(polling); polling = null; }
+}
+
+poll();
+polling = setInterval(poll, 1000);
+</script>
+</body>
+</html>

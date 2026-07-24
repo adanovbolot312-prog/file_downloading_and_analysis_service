@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Скачанные файлы</title>
+<style>
+body { font-family: -apple-system, Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; color: #222; background: #fff; }
+nav { margin-bottom: 30px; }
+nav a { margin-right: 20px; text-decoration: none; color: #0066cc; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 14px; }
+th { background: #f5f5f5; }
+button { padding: 8px 16px; font-size: 14px; background: #0066cc; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-right: 8px; }
+button:disabled { background: #999; cursor: default; }
+select { padding: 6px; font-size: 14px; }
+.toolbar { margin-top: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pager { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
+.selinfo { color: #555; font-size: 14px; }
+h2 { margin-top: 36px; }
+.num { text-align: right; }
+.fname { font-family: monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<nav><a href="/">Скачивание</a><a href="/files">Скачанные файлы</a></nav>
+<h1>Скачанные файлы</h1>
+<div class="toolbar">
+  <label>Сортировка по времени скачивания:
+    <select id="order" onchange="load(1)">
+      <option value="desc">сначала новые</option>
+      <option value="asc">сначала старые</option>
+    </select>
+  </label>
+  <label>На странице:
+    <select id="pageSize" onchange="load(1)">
+      <option>10</option><option>25</option><option>50</option><option>100</option>
+    </select>
+  </label>
+</div>
+<div class="toolbar">
+  <button onclick="selectPage()">Выбрать все на странице</button>
+  <button onclick="selectAll()">Выбрать вообще все</button>
+  <button onclick="clearSelection()">Снять выбор</button>
+  <button id="calcBtn" onclick="calculate()">Произвести расчёты</button>
+  <span class="selinfo" id="selInfo"></span>
+</div>
+<table id="filesTable">
+  <thead><tr><th></th><th>Имя файла</th><th>Время скачивания</th></tr></thead>
+  <tbody></tbody>
+</table>
+<div class="pager">
+  <button id="prevBtn" onclick="load(page - 1)">← Назад</button>
+  <span id="pageInfo"></span>
+  <button id="nextBtn" onclick="load(page + 1)">Вперёд →</button>
+</div>
+<div id="results"></div>
+<script>
+let page = 1;
+let totalPages = 1;
+let selected = new Set();
+let allSelected = false;
+let currentItems = [];
+
+function fmt(iso) {
+  return iso.replace('T', ' ').slice(0, 19);
+}
+
+function updateSelInfo() {
+  document.getElementById('selInfo').textContent = allSelected ? 'Выбраны все файлы' : `Выбрано: ${selected.size}`;
+}
+
+async function load(p) {
+  const size = document.getElementById('pageSize').value;
+  const order = document.getElementById('order').value;
+  const r = await fetch(`/api/downloaded?page=${p}&page_size=${size}&order=${order}`);
+  const data = await r.json();
+  page = data.page;
+  totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+  currentItems = data.items;
+  const tbody = document.querySelector('#filesTable tbody');
+  tbody.innerHTML = data.items.map(f => `
+    <tr>
+      <td><input type="checkbox" data-name="${f.name}" ${allSelected || selected.has(f.name) ? 'checked' : ''} onchange="toggle(this)"></td>
+      <td class="fname">${f.name}</td>
+      <td>${fmt(f.downloaded_at)}</td>
+    </tr>`).join('');
+  document.getElementById('pageInfo').textContent = `Страница ${page} из ${totalPages} (всего файлов: ${data.total})`;
+  document.getElementById('prevBtn').disabled = page <= 1;
+  document.getElementById('nextBtn').disabled = page >= totalPages;
+  updateSelInfo();
+}
+
+function toggle(cb) {
+  allSelected = false;
+  if (cb.checked) selected.add(cb.dataset.name);
+  else selected.delete(cb.dataset.name);
+  updateSelInfo();
+}
+
+function selectPage() {
+  allSelected = false;
+  currentItems.forEach(f => selected.add(f.name));
+  document.querySelectorAll('#filesTable tbody input').forEach(cb => cb.checked = true);
+  updateSelInfo();
+}
+
+function selectAll() {
+  allSelected = true;
+  selected.clear();
+  document.querySelectorAll('#filesTable tbody input').forEach(cb => cb.checked = true);
+  updateSelInfo();
+}
+
+function clearSelection() {
+  allSelected = false;
+  selected.clear();
+  document.querySelectorAll('#filesTable tbody input').forEach(cb => cb.checked = false);
+  updateSelInfo();
+}
+
+async function calculate() {
+  if (!allSelected && selected.size === 0) { alert('Выберите файлы'); return; }
+  const btn = document.getElementById('calcBtn');
+  btn.disabled = true;
+  const r = await fetch('/api/calculate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(allSelected ? { all: true } : { file_names: [...selected] })
+  });
+  const data = await r.json();
+  btn.disabled = false;
+  const digits = '0123456789'.split('');
+  const head = `<tr><th>Файл</th>${digits.map(d => `<th class="num">${d}</th>`).join('')}</tr>`;
+  const totalRow = `<tr><td><b>Все выбранные файлы</b></td>${digits.map(d => `<td class="num"><b>${data.total[d]}</b></td>`).join('')}</tr>`;
+  const fileRows = Object.entries(data.files).map(([name, c]) =>
+    `<tr><td class="fname">${name}</td>${digits.map(d => `<td class="num">${c[d]}</td>`).join('')}</tr>`).join('');
+  document.getElementById('results').innerHTML = `
+    <h2>Общая статистика</h2>
+    <table>${head}${totalRow}</table>
+    <h2>Статистика по файлам</h2>
+    <table>${head}${fileRows}</table>`;
+}
+
+load(1);
+</script>
+</body>
+</html>
